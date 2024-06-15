@@ -2,24 +2,35 @@
 # Firebase
 
 from Backup import *
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
-
-SCOPES = ['https://www.googleapis.com/auth/userinfo.email',
-          'https://www.googleapis.com/auth/userinfo.profile',
-          'openid']
-CLIENT_SECRET_FILE = 'google_auth.json'
-
 
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 def login():
+    from google.auth.transport.requests import Request
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    import googleapiclient
+
+    SCOPES = ['https://www.googleapis.com/auth/userinfo.email',
+              'https://www.googleapis.com/auth/userinfo.profile',
+              'openid']
+    CLIENT_SECRET_FILE = 'google_auth.json'
     flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, scopes=SCOPES)
     flow.run_local_server()
     credentials = flow.credentials
     # Use credentials.access_token to access Google APIs on behalf of the user
-    print(credentials)
+
+    if credentials:
+        from googleapiclient.discovery import build
+        user_email = build('oauth2', 'v2', credentials=credentials).userinfo().get().execute()['email']
+        return user_email
+    return None
+
+def handle_login():
+    user_email = login()
+    if user_email:
+        username.set(user_email)  # Update label text with user's email
+
 
 def toggle_action(selected_option):
     if selected_option == 1:
@@ -40,11 +51,9 @@ def toggle_action(selected_option):
         values_list.pack_forget()
 
 
-
-
-
 def add_value():
     value = input_field.get()
+
 
 
 if __name__ == '__main__':
@@ -52,8 +61,14 @@ if __name__ == '__main__':
     window.title("Backup")
     window.geometry("800x600")
 
-    login_button = tk.Button(window, text="Login with Google", command=login)
+    username = tk.StringVar()
+    username_label = tk.Label(window, textvariable=username)  # Corrected: use textvariable=username
+    username_label.pack(pady=20)
+
+    login_button = tk.Button(window, text="Login with Google", command=handle_login)
     login_button.pack(pady=20)
+
+
 
     # Create a variable to store the selected option
     toggle_var = tk.IntVar()
