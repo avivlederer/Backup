@@ -2,6 +2,7 @@
 # Firebase
 
 from Backup import *
+from Firebase import *
 
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -24,12 +25,14 @@ def login():
         from googleapiclient.discovery import build
         user_email = build('oauth2', 'v2', credentials=credentials).userinfo().get().execute()['email']
         return user_email
-    return None
+    raise LoginError('Authentication Failed')
 
 def handle_login():
     user_email = login()
     if user_email:
         username.set(user_email)  # Update label text with user's email
+        doc = get_or_create_user(user_email)
+        print(doc)
 
 
 def toggle_action(selected_option):
