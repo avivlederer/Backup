@@ -11,6 +11,10 @@ from tqdm.auto import tqdm
 from datetime import datetime
 import json
 from html import escape
+
+import tkinter as tk
+from tkinter import ttk
+
 def backup(source_paths, destination_path, start = -1):
     # Ensure the destination path exists
     if not os.path.exists(destination_path):
@@ -24,7 +28,28 @@ def backup(source_paths, destination_path, start = -1):
     total_files = 0
     for i in range(len(source_paths)):
         total_files += sum(len(files) for _, _, files in os.walk(source_paths[i]))
-    overall_pbar = tqdm(total=total_files, desc='Overall Progress')
+    overall_pbar = tqdm(total=total_files, desc='Overall Progress') # Py
+    description_label = tk.Label(window, text="Starting...")     # tk
+    description_label.pack(pady=10)
+    style = ttk.Style()
+    style.theme_use('clam')
+    style.configure("Custom.Horizontal.TProgressbar",
+                    thickness=30,  # Change thickness/height
+                    troughcolor='grey',  # Background color
+                    background='blue',  # Progress bar color
+                    borderwidth=2,  # Border width
+                    troughrelief='flat')  # Trough relief style (e.g., flat, raised)
+
+    frame = tk.Frame(window)
+    frame.pack(pady=10)
+    progress_bar = ttk.Progressbar(frame, orient="horizontal", length=300, maximum=total_files, mode="determinate", style="Custom.Horizontal.TProgressbar")
+    progress_bar.pack(pady=10)
+    style.configure("Custom.Horizontal.TLabel",
+                    background='blue',  # Background color
+                    foreground='white',  # Text color
+                    borderwidth=2)  # Border width
+    progress_label = tk.Label(frame, text="0%", anchor='center', background='blue', foreground='white')
+    progress_label.place(relx=0.5, rely=0.5, anchor='center')
 
     # Iterate through source paths
     for source_path in source_paths:
@@ -45,6 +70,7 @@ def backup(source_paths, destination_path, start = -1):
             destination_root = os.path.join(destination_dir, relative_path)
             os.makedirs(destination_root, exist_ok=True)
             overall_pbar.set_description(f"Processing {root}")
+            description_label.config(text=f"Processing {root}")
 
             # Copy new or modified files to the destination directory
             for file in files:   # Skip a few if the last update has failed to complete
@@ -68,6 +94,8 @@ def backup(source_paths, destination_path, start = -1):
                     else:
                         skipped_count += 1  # Increment for each file (including folders)
                     overall_pbar.update(1)
+                    progress_bar['value'] += 1
+                    window.update_idletasks()  # Update the UI
 
         # Remove deleted files from the destination directory
         for root, dirs, files in os.walk(destination_dir):
@@ -96,7 +124,7 @@ def backup(source_paths, destination_path, start = -1):
     
     return new_copied_count, replaced_count, skipped_count, deleted_count
 
-script = r'C:\Users\avivl\PyScripts\Backup.ipynb'
+
 
 
 # In[2]:
@@ -131,45 +159,109 @@ def write_bookmark_item(html_file, item, indentation=2):
         html_file.write(' ' * (indentation + 2))
         html_file.write('</ul>\n')
 
-chrome_bookmarks_path = r'C:\Users\avivl\AppData\Local\Google\Chrome\User Data\Default\Bookmarks'  # Update with your Chrome profile path
-output_html_file = rf'D:\גיבוי\מועדפים ישן\Chrome Bookmarks {str(datetime.today()).split()[0]}.html'
-
-with open(chrome_bookmarks_path, 'r', encoding='utf-8') as bookmarks_file:
-    bookmarks_data = json.load(bookmarks_file)
-
-convert_bookmarks_to_html(bookmarks_data, output_html_file)
-print(f'Bookmarks converted to HTML. Output saved to {output_html_file}')
-
-
-# # Weekly Backup
-
-
-
-
-source_paths = [r'C:\המדיה שלי', r'C:\הקבצים שלי', r'C:\Users\avivl\Desktop']
-destination_path = r'D:\גיבוי'
-
-
-# # Backup to the Backup
-
-
-#source_paths = [r'D:\גיבוי', r'D:\קבוע', r'D:\סרטי קולנוע\אא לא ראיתי']
-#destination_path = r'E:'
-
 
 # # Run!
+def handle_predefined(event):
+    selected_value = combobox_var.get()
+    backup_dict = {
+        'Test': [r'C:\Users\avivl\Desktop\Test1'],
+        'PC -> Backup': [r'C:\המדיה שלי', r'C:\הקבצים שלי', r'C:\Users\avivl\Desktop'],
+        'Backup -> Backup2': [r'D:\גיבוי', r'D:\קבוע', r'D:\סרטי קולנוע'],
+        'Only Movies': [r'D:\סרטי קולנוע'],
+    }
 
-print('Before we start:')
-destination_list = [destination_path+"\\"+folder.split("\\")[-1] for folder in source_paths]
-for i in range(len(source_paths)):
-    print(sum(len(files) for _, _, files in os.walk(source_paths[i])), sum(len(files) for _, _, files in os.walk(destination_list[i])), 'Source - ' + destination_list[i])
+    dest_dict = {
+        'Test': r'C:\Users\avivl\Desktop\Test2',
+        'PC -> Backup': r'D:\גיבוי',
+        'Backup -> Backup2': r'E:\\',
+        'Only Movies': r'E:\\'
+
+    }
+
+    source_paths = backup_dict[selected_value]
+    destination_path = dest_dict[selected_value]
+
+    new_copied_count, replaced_count, skipped_count, deleted_count = backup(source_paths, destination_path)
+    text_for_show = f"\n\nBackup Completed: {new_copied_count} Copied, {replaced_count} Replaced, {skipped_count} Skipped & {deleted_count} Deleted! \n Compare:"
+    text_label = tk.Label(window, text=text_for_show)
+    text_label.pack()
+
+    destination_list = [destination_path+"\\"+folder.split("\\")[-1] for folder in source_paths]
+    for i in range(len(source_paths)):
+        text_for_show += f"\n{sum(len(files) for _, _, files in os.walk(source_paths[i])), sum(len(files) for _, _, files in os.walk(destination_list[i])), destination_list[i]}"
+        text_label.config(text=text_for_show)
+
+    if selected_value == 'PC -> Backup':
+        chrome_bookmarks_path = r'C:\Users\avivl\AppData\Local\Google\Chrome\User Data\Default\Bookmarks'  # Update with your Chrome profile path
+        output_html_file = rf'D:\גיבוי\מועדפים ישן\Chrome Bookmarks {str(datetime.today()).split()[0]}.html'
+        with open(chrome_bookmarks_path, 'r', encoding='utf-8') as bookmarks_file:
+            bookmarks_data = json.load(bookmarks_file)
+        convert_bookmarks_to_html(bookmarks_data, output_html_file)
+        text_for_show += f"\nBookmarks converted to HTML. Output saved to {output_html_file}"
+        text_label.config(text=text_for_show)
+
+        shutil.copy2(os.path.abspath(__file__), destination_path+'\Backup.py')    #Backup.py
+        text_for_show += '\nThe updated script has been copied and the backup has been completed!'
+        text_label.config(text=text_for_show)
+
+    text_for_show += '\nDone!'
+    text_label.config(text=text_for_show)
+
+def toggle_action(selected_option):
+    if selected_option == 1:
+        input_label.pack_forget()  # Hide the input field and button
+        input_field.pack_forget()
+        add_button.pack_forget()
+        combobox.pack()
+        predefined_button_run.pack()
 
 
-new_copied_count, replaced_count, skipped_count, deleted_count = backup(source_paths, destination_path)
-print(f"Backup Completed: {new_copied_count} Copied, {replaced_count} Replaced, {skipped_count} Skipped & {deleted_count} Deleted! \n Compare:")
-destination_list = [destination_path+"\\"+folder.split("\\")[-1] for folder in source_paths]
-for i in range(len(source_paths)):
-    print(sum(len(files) for _, _, files in os.walk(source_paths[i])), sum(len(files) for _, _, files in os.walk(destination_list[i])), destination_list[i])
+    elif selected_option == 2:
+        # Show the list of predefined values
 
-shutil.copy2(script, destination_path+'\Backup.ipynb')
-print('The updated script has been copied and the backup has been completed!')
+        predefined_button_run.pack_forget()
+        input_label.pack()
+        input_field.pack()
+        add_button.pack()
+        values_list.pack_forget()
+
+
+
+
+
+def add_value():
+    value = input_field.get()
+
+
+if __name__ == '__main__':
+    window = tk.Tk()
+    window.title("Backup")
+    window.geometry("800x600")
+
+    # Create a variable to store the selected option
+    toggle_var = tk.IntVar()
+
+    # Create the toggle buttons
+    predefined_button= tk.Radiobutton(window, text="Predefined", variable=toggle_var, value=1, command=lambda: toggle_action(toggle_var.get()))
+    custom_button = tk.Radiobutton(window, text="Custom", variable=toggle_var, value=2,command=lambda: toggle_action(toggle_var.get()))
+
+    # Predefined values
+    options = ['Test', "PC -> Backup", "Backup -> Backup2", 'Only Movies']
+    combobox_var = tk.StringVar(value=options[0])
+    combobox = ttk.Combobox(window, textvariable=combobox_var, values=options)
+    #combobox.bind("<<ComboboxSelected>>", handle_predefined)
+
+
+    # Custom values
+    input_label = tk.Label(window, text="Enter a value:")
+    input_field = tk.Entry(window)
+    predefined_button_run = tk.Button(window, text="Run Predefined Backup",
+                                      command=lambda: handle_predefined(toggle_var.get()))
+    add_button = tk.Button(window, text="Add Value", command=add_value)
+
+
+    # Main screen
+    predefined_button.pack()
+    custom_button.pack()
+
+    window.mainloop()
