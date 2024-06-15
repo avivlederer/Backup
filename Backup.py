@@ -1,21 +1,16 @@
-# # FIX: DELETE EMPTY FOLDERS FROM THE DESTINATION PATH!
-# ### Add an interface
-# ## Is it working?
-# # Onenote?
-# Print folders' size VS backup size
-
-
 import os
 import shutil
 from tqdm.auto import tqdm
+from html import escape
+import os
+import shutil
 from datetime import datetime
 import json
-from html import escape
 
 import tkinter as tk
 from tkinter import ttk
 
-def backup(source_paths, destination_path, start = -1):
+def backup(window, source_paths, destination_path, start=-1):
     # Ensure the destination path exists
     if not os.path.exists(destination_path):
         os.makedirs(destination_path)
@@ -28,8 +23,8 @@ def backup(source_paths, destination_path, start = -1):
     total_files = 0
     for i in range(len(source_paths)):
         total_files += sum(len(files) for _, _, files in os.walk(source_paths[i]))
-    overall_pbar = tqdm(total=total_files, desc='Overall Progress') # Py
-    description_label = tk.Label(window, text="Starting...")     # tk
+    overall_pbar = tqdm(total=total_files, desc='Overall Progress')  # Py
+    description_label = tk.Label(window, text="Starting...")  # tk
     description_label.pack(pady=10)
     style = ttk.Style()
     style.theme_use('clam')
@@ -42,7 +37,8 @@ def backup(source_paths, destination_path, start = -1):
 
     frame = tk.Frame(window)
     frame.pack(pady=10)
-    progress_bar = ttk.Progressbar(frame, orient="horizontal", length=300, maximum=total_files, mode="determinate", style="Custom.Horizontal.TProgressbar")
+    progress_bar = ttk.Progressbar(frame, orient="horizontal", length=300, maximum=total_files, mode="determinate",
+                                   style="Custom.Horizontal.TProgressbar")
     progress_bar.pack(pady=10)
     style.configure("Custom.Horizontal.TLabel",
                     background='blue',  # Background color
@@ -73,7 +69,7 @@ def backup(source_paths, destination_path, start = -1):
             description_label.config(text=f"Processing {root}")
 
             # Copy new or modified files to the destination directory
-            for file in files:   # Skip a few if the last update has failed to complete
+            for file in files:  # Skip a few if the last update has failed to complete
                 if overall_pbar.n < start:
                     pass
                 else:
@@ -81,7 +77,8 @@ def backup(source_paths, destination_path, start = -1):
                     destination_file = os.path.join(destination_root, file)
 
                     # Copy the file if it's new or modified (based on size)
-                    if not os.path.exists(destination_file) or os.path.getsize(source_file) != os.path.getsize(destination_file):
+                    if not os.path.exists(destination_file) or os.path.getsize(source_file) != os.path.getsize(
+                            destination_file):
                         try:
                             shutil.copy2(source_file, destination_file)
                         except Exception as e:
@@ -90,7 +87,7 @@ def backup(source_paths, destination_path, start = -1):
                             new_copied_count += 1
                         else:
                             replaced_count += 1
-    
+
                     else:
                         skipped_count += 1  # Increment for each file (including folders)
                     overall_pbar.update(1)
@@ -110,10 +107,10 @@ def backup(source_paths, destination_path, start = -1):
                         deleted_count += 1
                     except Exception as e:
                         print(f'{e}: {source_file}')
-                        
+
     # Close the overall progress bar
     overall_pbar.close()
-    
+
     # Remove empty directories from the destination directory
     for root, dirs, files in os.walk(destination_dir, topdown=False):
         for dir in dirs:
@@ -121,10 +118,8 @@ def backup(source_paths, destination_path, start = -1):
             if not os.listdir(dir_path):  # Check if the directory is empty
                 os.rmdir(dir_path)
                 print(f'Deleted an empty folder: {dir_path}')
-    
+
     return new_copied_count, replaced_count, skipped_count, deleted_count
-
-
 
 
 # In[2]:
@@ -140,6 +135,7 @@ def convert_bookmarks_to_html(bookmarks, output_file):
             write_bookmark_item(html_file, item)
 
         html_file.write('</ul>\n</body>\n</html>\n')
+
 
 def write_bookmark_item(html_file, item, indentation=2):
     url = item.get('url', '')
@@ -160,7 +156,6 @@ def write_bookmark_item(html_file, item, indentation=2):
         html_file.write('</ul>\n')
 
 
-# # Run!
 def handle_predefined(event):
     selected_value = combobox_var.get()
     backup_dict = {
@@ -181,7 +176,7 @@ def handle_predefined(event):
     source_paths = backup_dict[selected_value]
     destination_path = dest_dict[selected_value]
 
-    new_copied_count, replaced_count, skipped_count, deleted_count = backup(source_paths, destination_path)
+    new_copied_count, replaced_count, skipped_count, deleted_count = backup(window, source_paths, destination_path)
     text_for_show = f"\n\nBackup Completed: {new_copied_count} Copied, {replaced_count} Replaced, {skipped_count} Skipped & {deleted_count} Deleted! \n Compare:"
     text_label = tk.Label(window, text=text_for_show)
     text_label.pack()
@@ -200,68 +195,9 @@ def handle_predefined(event):
         text_for_show += f"\nBookmarks converted to HTML. Output saved to {output_html_file}"
         text_label.config(text=text_for_show)
 
-        shutil.copy2(os.path.abspath(__file__), destination_path+'\Backup.py')    #Backup.py
+        shutil.copy2(os.path.abspath(__file__), destination_path+'\Backup.py')    #MainApp.py
         text_for_show += '\nThe updated script has been copied and the backup has been completed!'
         text_label.config(text=text_for_show)
 
     text_for_show += '\nDone!'
     text_label.config(text=text_for_show)
-
-def toggle_action(selected_option):
-    if selected_option == 1:
-        input_label.pack_forget()  # Hide the input field and button
-        input_field.pack_forget()
-        add_button.pack_forget()
-        combobox.pack()
-        predefined_button_run.pack()
-
-
-    elif selected_option == 2:
-        # Show the list of predefined values
-
-        predefined_button_run.pack_forget()
-        input_label.pack()
-        input_field.pack()
-        add_button.pack()
-        values_list.pack_forget()
-
-
-
-
-
-def add_value():
-    value = input_field.get()
-
-
-if __name__ == '__main__':
-    window = tk.Tk()
-    window.title("Backup")
-    window.geometry("800x600")
-
-    # Create a variable to store the selected option
-    toggle_var = tk.IntVar()
-
-    # Create the toggle buttons
-    predefined_button= tk.Radiobutton(window, text="Predefined", variable=toggle_var, value=1, command=lambda: toggle_action(toggle_var.get()))
-    custom_button = tk.Radiobutton(window, text="Custom", variable=toggle_var, value=2,command=lambda: toggle_action(toggle_var.get()))
-
-    # Predefined values
-    options = ['Test', "PC -> Backup", "Backup -> Backup2", 'Only Movies']
-    combobox_var = tk.StringVar(value=options[0])
-    combobox = ttk.Combobox(window, textvariable=combobox_var, values=options)
-    #combobox.bind("<<ComboboxSelected>>", handle_predefined)
-
-
-    # Custom values
-    input_label = tk.Label(window, text="Enter a value:")
-    input_field = tk.Entry(window)
-    predefined_button_run = tk.Button(window, text="Run Predefined Backup",
-                                      command=lambda: handle_predefined(toggle_var.get()))
-    add_button = tk.Button(window, text="Add Value", command=add_value)
-
-
-    # Main screen
-    predefined_button.pack()
-    custom_button.pack()
-
-    window.mainloop()
