@@ -21,7 +21,26 @@ def get_or_create_user(username):
             'username': username,
             'created_at': firestore.SERVER_TIMESTAMP,
             'last modified_at': firestore.SERVER_TIMESTAMP,
-            'Paths': []
+            'SourcePaths': [],
+            'DestinationPaths': []
+
         })
         print(f'Created new user with username {username}.')
         return new_doc_ref.id, {'username': username}  # Return document ID and data
+
+def find_user(username):
+    # Reference to the 'users' collection
+    users_ref = db.collection('users')
+
+    # Query the collection to find the document with the given username
+    query = users_ref.where('username', '==', username)
+    results = query.get()
+
+    if results:
+        return results[0]     # Username exists, retrieve the first document
+
+def add_path(doc, new_string):
+    doc_ref = doc.reference # Use ArrayUnion to add new strings to the array field 'myArrayField'
+    doc_ref.update({
+            'SourcePaths': firestore.ArrayUnion([new_string])
+    })

@@ -1,5 +1,10 @@
+# Fix FB:
+    # 1. Add source path
+    # 2. Add- source/dest path
+    # 3. Support delete
+    # 4. Force login
 # FIX: DELETE EMPTY FOLDERS FROM THE DESTINATION PATH!
-# Firebase
+
 
 from Backup import *
 from Firebase import *
@@ -45,17 +50,19 @@ def toggle_action(selected_option):
 
 
     elif selected_option == 2:
-        # Show the list of predefined values
-
-        predefined_button_run.pack_forget()
+        predefined_button_run.pack_forget()    # Hide the list of predefined values
         input_label.pack()
         input_field.pack()
         add_button.pack()
-        values_list.pack_forget()
+        #values_list.pack_forget()
 
 
 def add_value():
-    value = input_field.get()
+    global username
+    print(username)
+    user_doc = find_user(username)
+    print(user_doc)
+    add_path(user_doc, input_field.get())
 
 
 
@@ -90,11 +97,11 @@ if __name__ == '__main__':
 
 
     # Custom values
-    input_label = tk.Label(window, text="Enter a value:")
+    input_label = tk.Label(window, text="Enter a Source Path or a Destination Path:")
     input_field = tk.Entry(window)
     predefined_button_run = tk.Button(window, text="Run Predefined Backup",
                                       command=lambda: handle_predefined(toggle_var.get()))
-    add_button = tk.Button(window, text="Add Value", command=add_value)
+    add_button = tk.Button(window, text="Add", command=add_value)
 
 
     # Main screen
