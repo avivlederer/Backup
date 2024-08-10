@@ -88,19 +88,18 @@ if __name__ == '__main__':
     custom_button = tk.Radiobutton(window, text="Custom", variable=toggle_var, value=2,command=lambda: toggle_action(toggle_var.get()))
 
 
-
     # Predefined values
     options = ['Test', "PC -> Backup", "Backup -> Backup2", 'Only Movies']
     combobox_var = tk.StringVar(value=options[0])
     combobox = ttk.Combobox(window, textvariable=combobox_var, values=options)
-    #combobox.bind("<<ComboboxSelected>>", handle_predefined)
+    #combobox.bind("<<ComboboxSelected>>", lambda event: print(combobox_var.get()))
+    predefined_button_run = tk.Button(window, text="Run Predefined Backup",
+                                      command=lambda: handle_predefined(combobox_var.get(), window))
 
 
     # Custom values
     input_label = tk.Label(window, text="Enter a Source Path or a Destination Path:")
     input_field = tk.Entry(window)
-    predefined_button_run = tk.Button(window, text="Run Predefined Backup",
-                                      command=lambda: handle_predefined(toggle_var.get()))
     add_button = tk.Button(window, text="Add", command=add_value)
 
 

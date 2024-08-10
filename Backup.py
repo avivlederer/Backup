@@ -156,8 +156,9 @@ def write_bookmark_item(html_file, item, indentation=2):
         html_file.write('</ul>\n')
 
 
-def handle_predefined(event):
-    selected_value = combobox_var.get()
+def handle_predefined(event, window):
+    #selected_value = combobox_var.get()
+    selected_value = event
     backup_dict = {
         'Test': [r'C:\Users\avivl\Desktop\Test1'],
         'PC -> Backup': [r'C:\המדיה שלי', r'C:\הקבצים שלי', r'C:\Users\avivl\Desktop'],
