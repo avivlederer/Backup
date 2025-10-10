@@ -10,11 +10,79 @@ import json
 import tkinter as tk
 from tkinter import ttk
 
+def is_video_file(file_path):
+    """Check if file is a video file based on extension"""
+    video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp', '.mpg', '.mpeg', '.m2v', '.m4p', '.m4b', '.f4v', '.f4p', '.f4a', '.f4b'}
+    return os.path.splitext(file_path.lower())[1] in video_extensions
+
+def get_file_hash(file_path, chunk_size=8192):
+    """Get MD5 hash of file for content verification"""
+    import hashlib
+    hash_md5 = hashlib.md5()
+    try:
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(chunk_size), b""):
+                hash_md5.update(chunk)
+        return hash_md5.hexdigest()
+    except Exception as e:
+        print(f"Error calculating hash for {file_path}: {e}")
+        return None
+
+def should_copy_file(source_file, destination_file, is_video=False):
+    """Determine if file should be copied based on type and comparison method"""
+    if not os.path.exists(destination_file):
+        return True, "new"
+    
+    if is_video:
+        # For video files, use content hash for more reliable comparison
+        source_hash = get_file_hash(source_file)
+        dest_hash = get_file_hash(destination_file)
+        
+        if source_hash and dest_hash:
+            if source_hash != dest_hash:
+                return True, "replaced"
+            else:
+                return False, "skipped"
+        else:
+            # Fallback to size and mtime if hash fails
+            source_size = os.path.getsize(source_file)
+            dest_size = os.path.getsize(destination_file)
+            source_mtime = os.path.getmtime(source_file)
+            dest_mtime = os.path.getmtime(destination_file)
+            
+            if source_size != dest_size or source_mtime > dest_mtime:
+                return True, "replaced"
+            else:
+                return False, "skipped"
+    else:
+        # For non-video files, use size and modification time
+        source_mtime = os.path.getmtime(source_file)
+        dest_mtime = os.path.getmtime(destination_file)
+        source_size = os.path.getsize(source_file)
+        dest_size = os.path.getsize(destination_file)
+        
+        if source_mtime > dest_mtime or source_size != dest_size:
+            return True, "replaced"
+        else:
+            return False, "skipped"
+
 def backup(window, source_paths, destination_path, start=-1):
+    # Validate input parameters
+    if not source_paths or not destination_path:
+        raise ValueError("Source paths and destination path must be provided")
+    
+    # Check if source paths exist
+    for source_path in source_paths:
+        if not os.path.exists(source_path):
+            raise FileNotFoundError(f"Source path does not exist: {source_path}")
+    
     # Ensure the destination path exists
     if not os.path.exists(destination_path):
-        os.makedirs(destination_path)
-        print('Destination path has been created')
+        try:
+            os.makedirs(destination_path)
+            print('Destination path has been created')
+        except Exception as e:
+            raise Exception(f"Failed to create destination path: {e}")
 
     # Initialize counters
     new_copied_count, replaced_count, skipped_count, deleted_count = 0, 0, 0, 0
@@ -76,48 +144,77 @@ def backup(window, source_paths, destination_path, start=-1):
                     source_file = os.path.join(root, file)
                     destination_file = os.path.join(destination_root, file)
 
-                    # Copy the file if it's new or modified (based on size)
-                    if not os.path.exists(destination_file) or os.path.getsize(source_file) != os.path.getsize(
-                            destination_file):
+                    # Determine if this is a video file and use appropriate comparison method
+                    is_video = is_video_file(source_file)
+                    should_copy, copy_reason = should_copy_file(source_file, destination_file, is_video)
+                    
+                    if should_copy:
                         try:
                             shutil.copy2(source_file, destination_file)
+                            if copy_reason == "new":
+                                new_copied_count += 1
+                            elif copy_reason == "replaced":
+                                replaced_count += 1
                         except Exception as e:
-                            print(f'{e}: {source_file}')
-                        if not os.path.exists(destination_file):
-                            new_copied_count += 1
-                        else:
-                            replaced_count += 1
+                            print(f'Error copying {source_file}: {e}')
+                            # Decrement counter if copy failed
+                            if copy_reason == "new":
+                                new_copied_count -= 1
+                            elif copy_reason == "replaced":
+                                replaced_count -= 1
 
                     else:
                         skipped_count += 1  # Increment for each file (including folders)
                     overall_pbar.update(1)
                     progress_bar['value'] += 1
+                    # Update percent label text
+                    try:
+                        percent = int((progress_bar['value'] / progress_bar['maximum']) * 100) if progress_bar['maximum'] else 0
+                        progress_label.config(text=f"{percent}%")
+                    except Exception:
+                        pass
                     window.update_idletasks()  # Update the UI
 
         # Remove deleted files from the destination directory
         for root, dirs, files in os.walk(destination_dir):
             for file in files:
-                source_file = os.path.join(source_path, os.path.relpath(root, destination_dir), file)
-                destination_file = os.path.join(root, file)
+                try:
+                    # Calculate relative path from destination to source
+                    relative_path = os.path.relpath(root, destination_dir)
+                    source_file = os.path.join(source_path, relative_path, file)
+                    destination_file = os.path.join(root, file)
 
-                # Delete the file if it's not present in the source path
-                if not os.path.exists(source_file):
-                    try:
+                    # Delete the file if it's not present in the source path
+                    if not os.path.exists(source_file):
                         os.remove(destination_file)
                         deleted_count += 1
-                    except Exception as e:
-                        print(f'{e}: {source_file}')
+                except Exception as e:
+                    print(f'Error processing file {file} in {root}: {e}')
 
-    # Close the overall progress bar
+    # Close the overall progress bar and finalize UI to 100%
     overall_pbar.close()
+    try:
+        progress_bar['value'] = progress_bar['maximum']
+        progress_label.config(text="100%")
+        window.update_idletasks()
+    except Exception:
+        pass
 
-    # Remove empty directories from the destination directory
-    for root, dirs, files in os.walk(destination_dir, topdown=False):
-        for dir in dirs:
-            dir_path = os.path.join(root, dir)
-            if not os.listdir(dir_path):  # Check if the directory is empty
-                os.rmdir(dir_path)
-                print(f'Deleted an empty folder: {dir_path}')
+    # Remove empty directories from all destination directories
+    for source_path in source_paths:
+        base_dir = os.path.basename(os.path.normpath(source_path))
+        destination_dir = os.path.join(destination_path, base_dir)
+        
+        if os.path.exists(destination_dir):
+            for root, dirs, files in os.walk(destination_dir, topdown=False):
+                for dir in dirs:
+                    dir_path = os.path.join(root, dir)
+                    try:
+                        if not os.listdir(dir_path):  # Check if the directory is empty
+                            os.rmdir(dir_path)
+                            print(f'Deleted an empty folder: {dir_path}')
+                    except Exception as e:
+                        print(f'Error removing empty directory {dir_path}: {e}')
 
     return new_copied_count, replaced_count, skipped_count, deleted_count
 
@@ -157,27 +254,34 @@ def write_bookmark_item(html_file, item, indentation=2):
 
 
 def handle_predefined(event, window):
-    #selected_value = combobox_var.get()
-    selected_value = event
-    backup_dict = {
-        'Test': [r'C:\Users\avivl\Desktop\Test1'],
-        'PC -> Backup': [r'C:\המדיה שלי', r'C:\הקבצים שלי', r'C:\Users\avivl\Desktop'],
-        'Backup -> Backup2': [r'D:\גיבוי', r'D:\קבוע', r'D:\Series', r'D:\סרטי קולנוע'],
-        'Only Movies': [r'D:\סרטי קולנוע'],
-    }
+    try:
+        selected_value = event
+        backup_dict = {
+            'Test': [r'C:\Users\avivl\Desktop\Test1'],
+            'PC -> Backup': [r'C:\המדיה שלי', r'C:\הקבצים שלי', r'C:\Users\avivl\Desktop'],
+            'Backup -> Backup2': [r'D:\גיבוי', r'D:\קבוע', r'D:\Series', r'D:\סרטי קולנוע'],
+            'Only Movies': [r'D:\סרטי קולנוע'],
+        }
 
-    dest_dict = {
-        'Test': r'C:\Users\avivl\Desktop\Test2',
-        'PC -> Backup': r'D:\גיבוי',
-        'Backup -> Backup2': r'E:\\',
-        'Only Movies': r'E:\\'
+        dest_dict = {
+            'Test': r'C:\Users\avivl\Desktop\Test2',
+            'PC -> Backup': r'D:\גיבוי',
+            'Backup -> Backup2': r'E:\\',
+            'Only Movies': r'E:\\'
+        }
 
-    }
+        if selected_value not in backup_dict:
+            raise ValueError(f"Unknown backup option: {selected_value}")
 
-    source_paths = backup_dict[selected_value]
-    destination_path = dest_dict[selected_value]
+        source_paths = backup_dict[selected_value]
+        destination_path = dest_dict[selected_value]
 
-    new_copied_count, replaced_count, skipped_count, deleted_count = backup(window, source_paths, destination_path)
+        new_copied_count, replaced_count, skipped_count, deleted_count = backup(window, source_paths, destination_path)
+    except Exception as e:
+        error_text = f"Backup failed: {str(e)}"
+        error_label = tk.Label(window, text=error_text, fg='red')
+        error_label.pack()
+        return
     text_for_show = f"\n\nBackup Completed: {new_copied_count} Copied, {replaced_count} Replaced, {skipped_count} Skipped & {deleted_count} Deleted! \n Compare:"
     text_label = tk.Label(window, text=text_for_show)
     text_label.pack()

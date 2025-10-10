@@ -9,6 +9,10 @@
 from Backup import *
 from Firebase import *
 
+# Define missing exception class
+class LoginError(Exception):
+    pass
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -33,11 +37,17 @@ def login():
     raise LoginError('Authentication Failed')
 
 def handle_login():
-    user_email = login()
-    if user_email:
-        username.set(user_email)  # Update label text with user's email
-        doc = get_or_create_user(user_email)
-        print(doc)
+    try:
+        user_email = login()
+        if user_email:
+            username.set(user_email)  # Update label text with user's email
+            doc = get_or_create_user(user_email)
+            print(doc)
+            messagebox.showinfo("Success", f"Logged in as {user_email}")
+        else:
+            messagebox.showerror("Error", "Login failed")
+    except Exception as e:
+        messagebox.showerror("Login Error", f"Failed to login: {str(e)}")
 
 
 def toggle_action(selected_option):
@@ -59,10 +69,27 @@ def toggle_action(selected_option):
 
 def add_value():
     global username
-    print(username)
-    user_doc = find_user(username)
-    print(user_doc)
-    add_path(user_doc, input_field.get())
+    path = input_field.get().strip()
+    if not path:
+        messagebox.showerror("Error", "Please enter a valid path")
+        return
+    
+    if not os.path.exists(path):
+        messagebox.showerror("Error", f"Path does not exist: {path}")
+        return
+    
+    try:
+        print(username)
+        user_doc = find_user(username.get())
+        if not user_doc:
+            messagebox.showerror("Error", "User not found. Please login again.")
+            return
+        print(user_doc)
+        add_path(user_doc, path)
+        messagebox.showinfo("Success", f"Path added: {path}")
+        input_field.delete(0, tk.END)  # Clear the input field
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to add path: {str(e)}")
 
 
 
@@ -78,8 +105,6 @@ if __name__ == '__main__':
     login_button = tk.Button(window, text="Login with Google", command=handle_login)
     login_button.pack(pady=20)
 
-
-
     # Create a variable to store the selected option
     toggle_var = tk.IntVar()
 
@@ -87,24 +112,27 @@ if __name__ == '__main__':
     predefined_button= tk.Radiobutton(window, text="Predefined", variable=toggle_var, value=1, command=lambda: toggle_action(toggle_var.get()))
     custom_button = tk.Radiobutton(window, text="Custom", variable=toggle_var, value=2,command=lambda: toggle_action(toggle_var.get()))
 
-
     # Predefined values
     options = ['Test', "PC -> Backup", "Backup -> Backup2", 'Only Movies']
     combobox_var = tk.StringVar(value=options[0])
     combobox = ttk.Combobox(window, textvariable=combobox_var, values=options)
-    #combobox.bind("<<ComboboxSelected>>", lambda event: print(combobox_var.get()))
     predefined_button_run = tk.Button(window, text="Run Predefined Backup",
                                       command=lambda: handle_predefined(combobox_var.get(), window))
 
-
     # Custom values
     input_label = tk.Label(window, text="Enter a Source Path or a Destination Path:")
-    input_field = tk.Entry(window)
+    input_field = tk.Entry(window, width=50)
     add_button = tk.Button(window, text="Add", command=add_value)
-
 
     # Main screen
     predefined_button.pack()
     custom_button.pack()
+    
+    # Initially hide all optional elements
+    combobox.pack_forget()
+    predefined_button_run.pack_forget()
+    input_label.pack_forget()
+    input_field.pack_forget()
+    add_button.pack_forget()
 
     window.mainloop()

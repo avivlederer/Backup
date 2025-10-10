@@ -1,2 +1,2 @@
 # Backup
-Backup several folders on another device
+My app was built for my own personal needs, to automate backing up my stuff.

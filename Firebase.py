@@ -40,7 +40,27 @@ def find_user(username):
         return results[0]     # Username exists, retrieve the first document
 
 def add_path(doc, new_string):
-    doc_ref = doc.reference # Use ArrayUnion to add new strings to the array field 'myArrayField'
-    doc_ref.update({
-            'SourcePaths': firestore.ArrayUnion([new_string])
-    })
+    """Add a path to the user's SourcePaths array"""
+    try:
+        doc_ref = doc.reference
+        doc_ref.update({
+            'SourcePaths': firestore.ArrayUnion([new_string]),
+            'last modified_at': firestore.SERVER_TIMESTAMP
+        })
+        print(f"Successfully added path: {new_string}")
+    except Exception as e:
+        print(f"Error adding path: {e}")
+        raise
+
+def add_destination_path(doc, new_string):
+    """Add a destination path to the user's DestinationPaths array"""
+    try:
+        doc_ref = doc.reference
+        doc_ref.update({
+            'DestinationPaths': firestore.ArrayUnion([new_string]),
+            'last modified_at': firestore.SERVER_TIMESTAMP
+        })
+        print(f"Successfully added destination path: {new_string}")
+    except Exception as e:
+        print(f"Error adding destination path: {e}")
+        raise
