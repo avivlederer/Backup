@@ -162,7 +162,7 @@ def handle_predefined(event, window):
     backup_dict = {
         'Test': [r'C:\Users\avivl\Desktop\Test1'],
         'PC -> Backup': [r'C:\המדיה שלי', r'C:\הקבצים שלי', r'C:\Users\avivl\Desktop'],
-        'Backup -> Backup2': [r'D:\גיבוי', r'D:\קבוע', r'D:\סרטי קולנוע'],
+        'Backup -> Backup2': [r'D:\גיבוי', r'D:\קבוע', r'D:\Series', r'D:\סרטי קולנוע'],
         'Only Movies': [r'D:\סרטי קולנוע'],
     }
 
