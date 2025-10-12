@@ -49,6 +49,49 @@ def handle_login():
     except Exception as e:
         messagebox.showerror("Login Error", f"Failed to login: {str(e)}")
 
+def create_progress_window():
+    """Create a new window for backup progress"""
+    progress_window = tk.Toplevel(window)
+    progress_window.title("Backup Progress")
+    progress_window.geometry("600x400")
+    progress_window.grab_set()  # Make it modal
+    
+    # Progress UI elements
+    description_label = tk.Label(progress_window, text="Starting backup...", font=("Arial", 12))
+    description_label.pack(pady=10)
+    
+    stats_frame = tk.Frame(progress_window)
+    stats_frame.pack(pady=5)
+    
+    speed_label = tk.Label(stats_frame, text="Speed: 0 MB/s", font=("Arial", 10))
+    speed_label.pack(side=tk.LEFT, padx=20)
+    
+    eta_label = tk.Label(stats_frame, text="ETA: Calculating...", font=("Arial", 10))
+    eta_label.pack(side=tk.LEFT, padx=20)
+    
+    # Progress bar
+    progress_frame = tk.Frame(progress_window)
+    progress_frame.pack(pady=20)
+    
+    progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", length=500, mode="determinate")
+    progress_bar.pack(pady=10)
+    
+    progress_label = tk.Label(progress_frame, text="0%", font=("Arial", 12))
+    progress_label.pack()
+    
+    # Status label
+    status_label = tk.Label(progress_window, text="", font=("Arial", 10))
+    status_label.pack(pady=10)
+    
+    return progress_window, {
+        'description_label': description_label,
+        'speed_label': speed_label,
+        'eta_label': eta_label,
+        'progress_bar': progress_bar,
+        'progress_label': progress_label,
+        'status_label': status_label
+    }
+
 
 def toggle_action(selected_option):
     if selected_option == 1:
@@ -116,8 +159,16 @@ if __name__ == '__main__':
     options = ['Test', "PC -> Backup", "Backup -> Backup2", 'Only Movies']
     combobox_var = tk.StringVar(value=options[0])
     combobox = ttk.Combobox(window, textvariable=combobox_var, values=options)
-    predefined_button_run = tk.Button(window, text="Run Predefined Backup",
-                                      command=lambda: handle_predefined(combobox_var.get(), window))
+    def run_predefined_backup():
+        progress_window, ui_elements = create_progress_window()
+        try:
+            # Set progress bar maximum after creating it
+            handle_predefined(combobox_var.get(), progress_window, ui_elements)
+        except Exception as e:
+            messagebox.showerror("Error", f"Backup failed: {str(e)}")
+            progress_window.destroy()
+    
+    predefined_button_run = tk.Button(window, text="Run Predefined Backup", command=run_predefined_backup)
 
     # Custom values
     input_label = tk.Label(window, text="Enter a Source Path or a Destination Path:")
