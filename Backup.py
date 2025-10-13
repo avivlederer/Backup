@@ -443,6 +443,9 @@ Comparison:"""
             script_dest = os.path.join(destination_path, 'Backup.py')
             shutil.copy2(os.path.abspath(__file__), script_dest)
             logging.info(f"Script copied to {script_dest}")
+            script_dest2 = os.path.join(destination_path, 'MainApp.py')
+            shutil.copy2(os.path.abspath(__file__), script_dest2)
+            logging.info(f"Script copied to {script_dest2}")
         except Exception as e:
             logging.error(f"Failed to copy script: {e}")
         final_text = bookmarks_text + '\n\nThe updated script has been copied and the backup has been completed!\nDone!'
