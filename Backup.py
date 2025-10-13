@@ -5,6 +5,7 @@ from html import escape
 from datetime import datetime
 import json
 import logging
+import stat
 
 import tkinter as tk
 from tkinter import ttk
@@ -46,6 +47,49 @@ logging.basicConfig(
     level=logging.INFO,
     handlers=[file_handler, console_handler]
 )
+
+def safe_remove_directory(dir_path):
+    """Safely remove a directory with proper permission handling"""
+    try:
+        # Check if directory is empty
+        if os.listdir(dir_path):
+            return False  # Not empty, can't remove
+        
+        # Try to remove read-only attribute
+        try:
+            os.chmod(dir_path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+        except:
+            pass  # Ignore if we can't change permissions
+        
+        # Try to remove the directory
+        os.rmdir(dir_path)
+        logging.info(f'Deleted an empty folder: {dir_path}')
+        return True
+        
+    except PermissionError:
+        logging.warning(f'Permission denied - skipping empty directory: {dir_path}')
+        return False
+    except OSError as e:
+        if hasattr(e, 'winerror') and e.winerror == 5:  # Windows access denied
+            logging.warning(f'Access denied - skipping empty directory: {dir_path}')
+            # Try using Windows command line as last resort
+            try:
+                import subprocess
+                result = subprocess.run(['rmdir', '/q', dir_path], 
+                                      capture_output=True, text=True, shell=True)
+                if result.returncode == 0:
+                    logging.info(f'Successfully removed directory using rmdir command: {dir_path}')
+                    return True
+                else:
+                    logging.warning(f'rmdir command failed for: {dir_path}')
+            except Exception as cmd_error:
+                logging.warning(f'Command line removal also failed for: {dir_path}')
+        else:
+            logging.error(f'Error removing empty directory {dir_path}: {e}')
+        return False
+    except Exception as e:
+        logging.error(f'Error removing empty directory {dir_path}: {e}')
+        return False
 
 def is_video_file(file_path):
     """Check if file is a video file based on extension"""
@@ -127,6 +171,36 @@ def should_copy_file(source_file, destination_file, is_video=False):
         else:
             return False, "skipped"
 
+def folders_are_identical(src, dst):
+    """
+    Recursively check if all files and subfolders in src and dst match (name, size, mtime).
+    Fast: does NOT check file content, uses only file name, size, and mtime (modification time).
+    """
+    import os
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        other_root = os.path.join(dst, rel)
+        if not os.path.exists(other_root):
+            return False
+        try:
+            dst_entries = set(os.listdir(other_root)) if os.path.exists(other_root) else set()
+        except Exception:
+            return False
+        for fname in files:
+            src_file = os.path.join(root, fname)
+            dst_file = os.path.join(other_root, fname)
+            if not os.path.exists(dst_file):
+                return False
+            if os.path.getsize(src_file) != os.path.getsize(dst_file):
+                return False
+            # mtime is last-modified time. It is float seconds, usually good enough to check int seconds (platform-dependent)
+            if int(os.path.getmtime(src_file)) != int(os.path.getmtime(dst_file)):
+                return False
+        for dname in dirs:
+            if not os.path.isdir(os.path.join(other_root, dname)):
+                return False
+    return True
+
 def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
     # Validate input parameters
     if not source_paths or not destination_path:
@@ -161,8 +235,8 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
         ui_elements = {}
         
         # Enhanced UI elements
-        ui_elements['description_label'] = tk.Label(window, text="Starting backup...", font=("Arial", 10))
-        ui_elements['description_label'].pack(pady=5)
+        ui_elements['description_label'] = tk.Label(window, text="Starting backup...", font=("Arial", 10), wraplength=600, justify=tk.LEFT)
+        ui_elements['description_label'].pack(pady=5, padx=10, fill=tk.X)
         
         ui_elements['current_file_label'] = tk.Label(window, text="", font=("Arial", 8), fg="gray")
         ui_elements['current_file_label'].pack(pady=2)
@@ -170,11 +244,6 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
         ui_elements['stats_frame'] = tk.Frame(window)
         ui_elements['stats_frame'].pack(pady=5)
         
-        ui_elements['speed_label'] = tk.Label(ui_elements['stats_frame'], text="Speed: 0 MB/s", font=("Arial", 8))
-        ui_elements['speed_label'].pack(side=tk.LEFT, padx=10)
-        
-        ui_elements['eta_label'] = tk.Label(ui_elements['stats_frame'], text="ETA: Calculating...", font=("Arial", 8))
-        ui_elements['eta_label'].pack(side=tk.LEFT, padx=10)
     style = ttk.Style()
     style.theme_use('clam')
     style.configure("Custom.Horizontal.TProgressbar",
@@ -198,22 +267,30 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
 
     # Iterate through source paths
     for source_path in source_paths:
-        # Get the base directory name from the source path
-        base_dir = os.path.basename(os.path.normpath(source_path))
-
-        # Set up the destination path for the current source
-        destination_dir = os.path.join(destination_path, base_dir)
-
-        # If the destination path doesn't exist, create it
-        if not os.path.exists(destination_dir):
-            os.makedirs(destination_dir)
-
-        # Iterate through files and directories in the source path
+        skipped_roots = []
         for root, dirs, files in os.walk(source_path):
+            # If root is inside any already-skipped ancestor, skip (don't log again or process any children)
+            if any(root.startswith(skipped + os.sep) or root == skipped for skipped in skipped_roots):
+                continue
+            # Get the base directory name from the source path
+            base_dir = os.path.basename(os.path.normpath(source_path))
+
+            # Set up the destination path for the current source
+            destination_dir = os.path.join(destination_path, base_dir)
+
+            # If the destination path doesn't exist, create it
+            if not os.path.exists(destination_dir):
+                os.makedirs(destination_dir)
+
             # Create the corresponding directory structure in the destination path
             relative_path = os.path.relpath(root, source_path)
             destination_root = os.path.join(destination_dir, relative_path)
             os.makedirs(destination_root, exist_ok=True)
+            # High-level FOLDER SKIP: If the entire subtree is identical, skip+log only if not already under a skipped parent
+            if folders_are_identical(root, destination_root):
+                logging.info(f"Skipping identical folder: {root}")
+                skipped_roots.append(root)
+                continue
             overall_pbar.set_description(f"Processing {root}")
             ui_elements['description_label'].config(text=f"Processing {root}")
 
@@ -223,63 +300,53 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
                     overall_pbar.update(1)
                     ui_elements['progress_bar']['value'] += 1
                     continue
-                    source_file = os.path.join(root, file)
-                    destination_file = os.path.join(destination_root, file)
+                
+                source_file = os.path.join(root, file)
+                destination_file = os.path.join(destination_root, file)
 
-                    # Determine if this is a video file and use appropriate comparison method
-                    is_video = is_video_file(source_file)
-                    should_copy, copy_reason = should_copy_file(source_file, destination_file, is_video)
-                    
-                    
-                    if should_copy:
-                        try:
-                            # Track file size for speed calculation
-                            file_size = os.path.getsize(source_file)
-                            copy_start = datetime.now()
+                # Determine if this is a video file and use appropriate comparison method
+                is_video = is_video_file(source_file)
+                should_copy, copy_reason = should_copy_file(source_file, destination_file, is_video)
+                
+                if should_copy:
+                    try:
+                        # Track file size for speed calculation
+                        file_size = os.path.getsize(source_file)
+                        copy_start = datetime.now()
+                        
+                        shutil.copy2(source_file, destination_file)
+                        bytes_copied += file_size
+                        
+                        if copy_reason == "new":
+                            new_copied_count += 1
+                        elif copy_reason == "replaced":
+                            replaced_count += 1
                             
-                            shutil.copy2(source_file, destination_file)
-                            bytes_copied += file_size
-                            
-                            if copy_reason == "new":
-                                new_copied_count += 1
-                            elif copy_reason == "replaced":
-                                replaced_count += 1
-                                
-                            # Calculate and update speed/ETA
-                            elapsed_time = (datetime.now() - start_time).total_seconds()
-                            if elapsed_time > 0:
-                                speed_mbps = (bytes_copied / (1024 * 1024)) / elapsed_time
-                                remaining_files = total_files - overall_pbar.n
-                                if speed_mbps > 0:
-                                    eta_seconds = (remaining_files * (file_size / (1024 * 1024))) / speed_mbps
-                                    eta_text = f"ETA: {int(eta_seconds//60)}m {int(eta_seconds%60)}s" if eta_seconds > 60 else f"ETA: {int(eta_seconds)}s"
-                                else:
-                                    eta_text = "ETA: Calculating..."
-                                
-                                ui_elements['speed_label'].config(text=f"Speed: {speed_mbps:.1f} MB/s")
-                                ui_elements['eta_label'].config(text=eta_text)
-                                
-                        except Exception as e:
-                            logging.error(f'Error copying {source_file}: {e}')
-                            # Decrement counter if copy failed
-                            if copy_reason == "new":
-                                new_copied_count -= 1
-                            elif copy_reason == "replaced":
-                                replaced_count -= 1
+                        # Remove all code and calculations regarding speed_label, eta_label, speed, files_per_second, and ETA updates.
+                        # Only keep progress bar and 'Processing' text updates, and final summary UI.
+                        
+                    except Exception as e:
+                        logging.error(f'Error copying {source_file}: {e}')
+                        # Decrement counter if copy failed
+                        if copy_reason == "new":
+                            new_copied_count -= 1
+                        elif copy_reason == "replaced":
+                            replaced_count -= 1
 
-                    else:
-                        skipped_count += 1  # Increment for each file (including folders)
-                    overall_pbar.update(1)
-                    ui_elements['progress_bar']['value'] += 1
-                    
-                    # Update UI less frequently for better performance (every 10 files or at end)
-                    if ui_elements['progress_bar']['value'] % 10 == 0 or ui_elements['progress_bar']['value'] == ui_elements['progress_bar']['maximum']:
-                        try:
-                            percent = int((ui_elements['progress_bar']['value'] / ui_elements['progress_bar']['maximum']) * 100) if ui_elements['progress_bar']['maximum'] else 0
-                            ui_elements['progress_label'].config(text=f"{percent}%")
-                            window.update_idletasks()  # Update the UI
-                        except Exception as e:
-                            logging.warning(f"Failed to update progress label: {e}")
+                else:
+                    skipped_count += 1  # Increment for each file (including folders)
+                
+                overall_pbar.update(1)
+                ui_elements['progress_bar']['value'] += 1
+                
+                # Update UI less frequently for better performance (every 10 files or at end)
+                if ui_elements['progress_bar']['value'] % 10 == 0 or ui_elements['progress_bar']['value'] == ui_elements['progress_bar']['maximum']:
+                    try:
+                        percent = int((ui_elements['progress_bar']['value'] / ui_elements['progress_bar']['maximum']) * 100) if ui_elements['progress_bar']['maximum'] else 0
+                        ui_elements['progress_label'].config(text=f"{percent}%")
+                        window.update_idletasks()  # Update the UI
+                    except Exception as e:
+                        logging.warning(f"Failed to update progress label: {e}")
 
         # Remove deleted files from the destination directory
         for root, dirs, files in os.walk(destination_dir):
@@ -306,9 +373,10 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
         # Final statistics
         total_time = (datetime.now() - start_time).total_seconds()
         avg_speed = (bytes_copied / (1024 * 1024)) / total_time if total_time > 0 else 0
+        files_per_second = total_files / total_time if total_time > 0 else 0
         
         ui_elements['current_file_label'].config(text="Backup completed!")
-        ui_elements['speed_label'].config(text=f"Final Speed: {avg_speed:.1f} MB/s")
+        ui_elements['speed_label'].config(text=f"Final Speed: {files_per_second:.1f} files/s")
         ui_elements['eta_label'].config(text=f"Total Time: {int(total_time//60)}m {int(total_time%60)}s")
         
         window.update_idletasks()
@@ -324,12 +392,7 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
             for root, dirs, files in os.walk(destination_dir, topdown=False):
                 for dir in dirs:
                     dir_path = os.path.join(root, dir)
-                    try:
-                        if not os.listdir(dir_path):  # Check if the directory is empty
-                            os.rmdir(dir_path)
-                            logging.info(f'Deleted an empty folder: {dir_path}')
-                    except Exception as e:
-                        logging.error(f'Error removing empty directory {dir_path}: {e}')
+                    safe_remove_directory(dir_path)
 
     return new_copied_count, replaced_count, skipped_count, deleted_count, bytes_copied, total_time
 
@@ -404,15 +467,12 @@ def handle_predefined(event, window, ui_elements):
     
     summary_text = f"""Backup Summary:
 Files: {new_copied_count} New, {replaced_count} Replaced, {skipped_count} Skipped, {deleted_count} Deleted
-Data: {data_size_gb:.2f} GB processed
+Data: {data_size_gb:.2f} GB changed
 Total Time: {int(total_time//60)}m {int(total_time%60)}s
 Average Speed: {avg_speed:.1f} MB/s
 
 Comparison:"""
     
-    text_label = tk.Label(window, text=summary_text, font=("Arial", 9), justify=tk.LEFT)
-    text_label.pack(pady=10)
-
     # Build comparison text more efficiently
     comparison_lines = []
     for i, source_path in enumerate(source_paths):
@@ -426,8 +486,22 @@ Comparison:"""
         except Exception as e:
             comparison_lines.append(f"\nError comparing {dest_path}: {e}")
     
-    comparison_text = summary_text + "".join(comparison_lines)
-    text_label.config(text=comparison_text)
+    # Combine summary and comparison
+    full_text = summary_text + "".join(comparison_lines)
+    
+    # Create a scrollable text widget for better display
+    text_frame = tk.Frame(window)
+    text_frame.pack(pady=10, fill=tk.BOTH, expand=True)
+    
+    text_widget = tk.Text(text_frame, font=("Arial", 9), wrap=tk.WORD, height=15)
+    scrollbar = tk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
+    text_widget.configure(yscrollcommand=scrollbar.set)
+    
+    text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    text_widget.insert(tk.END, full_text)
+    text_widget.config(state=tk.DISABLED)  # Make it read-only
 
     if selected_value == 'PC -> Backup':
         chrome_bookmarks_path = r'C:\Users\avivl\AppData\Local\Google\Chrome\User Data\Default\Bookmarks'  # Update with your Chrome profile path
@@ -435,21 +509,24 @@ Comparison:"""
         with open(chrome_bookmarks_path, 'r', encoding='utf-8') as bookmarks_file:
             bookmarks_data = json.load(bookmarks_file)
         convert_bookmarks_to_html(bookmarks_data, output_html_file)
-        bookmarks_text = comparison_text + f"\n\nBookmarks converted to HTML. Output saved to {output_html_file}"
-        text_label.config(text=bookmarks_text)
+        bookmarks_text = full_text + f"\n\nBookmarks converted to HTML. Output saved to {output_html_file}"
+        text_widget.config(state=tk.NORMAL)
+        text_widget.delete(1.0, tk.END)
+        text_widget.insert(tk.END, bookmarks_text)
+        text_widget.config(state=tk.DISABLED)
 
         # Copy current script to backup location
         try:
             script_dest = os.path.join(destination_path, 'Backup.py')
             shutil.copy2(os.path.abspath(__file__), script_dest)
             logging.info(f"Script copied to {script_dest}")
-            script_dest2 = os.path.join(destination_path, 'MainApp.py')
-            shutil.copy2(os.path.abspath(__file__), script_dest2)
-            logging.info(f"Script copied to {script_dest2}")
         except Exception as e:
             logging.error(f"Failed to copy script: {e}")
         final_text = bookmarks_text + '\n\nThe updated script has been copied and the backup has been completed!\nDone!'
     else:
-        final_text = comparison_text + '\n\nDone!'
+        final_text = full_text + '\n\nDone!'
     
-    text_label.config(text=final_text)
+    text_widget.config(state=tk.NORMAL)
+    text_widget.delete(1.0, tk.END)
+    text_widget.insert(tk.END, final_text)
+    text_widget.config(state=tk.DISABLED)

@@ -57,39 +57,26 @@ def create_progress_window():
     progress_window.grab_set()  # Make it modal
     
     # Progress UI elements
-    description_label = tk.Label(progress_window, text="Starting backup...", font=("Arial", 12))
-    description_label.pack(pady=10)
+    description_label = tk.Label(progress_window, text="Starting backup...", font=("Arial", 12), wraplength=600, justify=tk.LEFT)
+    description_label.pack(pady=10, padx=10, fill=tk.X)
     
     stats_frame = tk.Frame(progress_window)
     stats_frame.pack(pady=5)
-    
-    speed_label = tk.Label(stats_frame, text="Speed: 0 MB/s", font=("Arial", 10))
-    speed_label.pack(side=tk.LEFT, padx=20)
-    
-    eta_label = tk.Label(stats_frame, text="ETA: Calculating...", font=("Arial", 10))
-    eta_label.pack(side=tk.LEFT, padx=20)
-    
-    # Progress bar
-    progress_frame = tk.Frame(progress_window)
-    progress_frame.pack(pady=20)
-    
-    progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", length=500, mode="determinate")
-    progress_bar.pack(pady=10)
-    
-    progress_label = tk.Label(progress_frame, text="0%", font=("Arial", 12))
-    progress_label.pack()
+      
+    # Progress bar will be created by Backup.py
     
     # Status label
     status_label = tk.Label(progress_window, text="", font=("Arial", 10))
     status_label.pack(pady=10)
     
+    # Current file label (for compatibility with backup function)
+    current_file_label = tk.Label(progress_window, text="", font=("Arial", 8), fg="gray")
+    current_file_label.pack(pady=2)
+    
     return progress_window, {
         'description_label': description_label,
-        'speed_label': speed_label,
-        'eta_label': eta_label,
-        'progress_bar': progress_bar,
-        'progress_label': progress_label,
-        'status_label': status_label
+        'status_label': status_label,
+        'current_file_label': current_file_label
     }
 
 
