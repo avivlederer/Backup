@@ -37,7 +37,7 @@ class RTLFormatter(logging.Formatter):
 formatter = RTLFormatter('%(asctime)s - %(levelname)s - %(message)s')
 
 # Configure logging
-file_handler = logging.FileHandler('backup.log', encoding='utf-8')
+file_handler = logging.FileHandler('logs/backup.log', encoding='utf-8')
 file_handler.setFormatter(formatter)
 
 console_handler = logging.StreamHandler()
@@ -201,6 +201,29 @@ def folders_are_identical(src, dst):
                 return False
     return True
 
+def sync_folder_deletes(source_root, dest_root):
+    """
+    Recursively remove files/folders from dest_root that do not exist in source_root.
+    This is called only for folders that are skipped as 'identical', to ensure true mirroring.
+    """
+    for root, dirs, files in os.walk(dest_root, topdown=False):
+        rel = os.path.relpath(root, dest_root)
+        src_root = os.path.join(source_root, rel)
+        # Remove files not in source
+        for f in files:
+            src_file = os.path.join(src_root, f)
+            dst_file = os.path.join(root, f)
+            if not os.path.exists(src_file):
+                os.remove(dst_file)
+                logging.info(f"Deleted extra file in backup: {dst_file}")
+        # Remove dirs not in source
+        for d in dirs:
+            src_dir = os.path.join(src_root, d)
+            dst_dir = os.path.join(root, d)
+            if not os.path.exists(src_dir):
+                shutil.rmtree(dst_dir)
+                logging.info(f"Deleted extra folder in backup: {dst_dir}")
+
 def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
     # Validate input parameters
     if not source_paths or not destination_path:
@@ -289,6 +312,7 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
             # High-level FOLDER SKIP: If the entire subtree is identical, skip+log only if not already under a skipped parent
             if folders_are_identical(root, destination_root):
                 logging.info(f"Skipping identical folder: {root}")
+                sync_folder_deletes(root, destination_root)
                 skipped_roots.append(root)
                 continue
             overall_pbar.set_description(f"Processing {root}")
@@ -517,9 +541,10 @@ Comparison:"""
 
         # Copy current script to backup location
         try:
-            script_dest = os.path.join(destination_path, 'Backup.py')
-            shutil.copy2(os.path.abspath(__file__), script_dest)
-            logging.info(f"Script copied to {script_dest}")
+            for script in ['Backup.py', 'MainApp.py']:
+                script_dest = os.path.join(destination_path, script)
+                shutil.copy2(os.path.abspath(__file__), script_dest)
+            logging.info(f"Backup scripts copied")
         except Exception as e:
             logging.error(f"Failed to copy script: {e}")
         final_text = bookmarks_text + '\n\nThe updated script has been copied and the backup has been completed!\nDone!'
