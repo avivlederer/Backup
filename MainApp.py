@@ -15,6 +15,9 @@ class LoginError(Exception):
 
 import tkinter as tk
 from tkinter import ttk, messagebox
+import threading
+import queue
+import logging
 
 def login():
     from google.auth.transport.requests import Request
@@ -148,12 +151,41 @@ if __name__ == '__main__':
     combobox = ttk.Combobox(window, textvariable=combobox_var, values=options)
     def run_predefined_backup():
         progress_window, ui_elements = create_progress_window()
-        try:
-            # Set progress bar maximum after creating it
-            handle_predefined(combobox_var.get(), progress_window, ui_elements)
-        except Exception as e:
-            messagebox.showerror("Error", f"Backup failed: {str(e)}")
-            progress_window.destroy()
+        
+        # Create a queue for thread-safe UI updates
+        update_queue = queue.Queue()
+        
+        def update_ui():
+            """Process UI updates from the queue on the main thread"""
+            try:
+                while True:
+                    try:
+                        update_func = update_queue.get_nowait()
+                        update_func()
+                    except queue.Empty:
+                        break
+            except Exception as e:
+                logging.error(f"Error processing UI update: {e}")
+            # Schedule next check
+            window.after(100, update_ui)
+        
+        def backup_thread():
+            """Run backup in background thread"""
+            try:
+                # Set progress bar maximum after creating it
+                handle_predefined(combobox_var.get(), progress_window, ui_elements, update_queue)
+            except Exception as e:
+                def show_error():
+                    messagebox.showerror("Error", f"Backup failed: {str(e)}")
+                    progress_window.destroy()
+                update_queue.put(show_error)
+        
+        # Start UI update checker
+        update_ui()
+        
+        # Start backup in background thread
+        thread = threading.Thread(target=backup_thread, daemon=True)
+        thread.start()
     
     predefined_button_run = tk.Button(window, text="Run Predefined Backup", command=run_predefined_backup)
 

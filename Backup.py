@@ -224,7 +224,16 @@ def sync_folder_deletes(source_root, dest_root):
                 shutil.rmtree(dst_dir)
                 logging.info(f"Deleted extra folder in backup: {dst_dir}")
 
-def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
+def backup(window, source_paths, destination_path, start=-1, ui_elements=None, update_queue=None):
+    # Helper function for thread-safe UI updates
+    def safe_update(func):
+        """Schedule UI update on main thread"""
+        if update_queue is not None:
+            update_queue.put(func)
+        else:
+            # If no queue, update directly (for backward compatibility)
+            func()
+    
     # Validate input parameters
     if not source_paths or not destination_path:
         raise ValueError("Source paths and destination path must be provided")
@@ -291,9 +300,35 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
     # Iterate through source paths
     for source_path in source_paths:
         skipped_roots = []
-        for root, dirs, files in os.walk(source_path):
+        try:
+            walk_iter = os.walk(source_path)
+        except (PermissionError, OSError) as e:
+            error_msg = f"Access denied: {source_path}"
+            logging.error(f'{error_msg}: {e}')
+            if 'status_label' in ui_elements:
+                safe_update(lambda: ui_elements['status_label'].config(text=error_msg, fg='red'))
+            continue
+        
+        for root, dirs, files in walk_iter:
             # If root is inside any already-skipped ancestor, skip (don't log again or process any children)
             if any(root.startswith(skipped + os.sep) or root == skipped for skipped in skipped_roots):
+                continue
+            
+            # Skip directories we can't access
+            try:
+                # Test if we can access this directory
+                os.listdir(root)
+            except (PermissionError, OSError) as e:
+                error_msg = f"Access denied: {root}"
+                logging.warning(f'{error_msg}: {e}')
+                if 'status_label' in ui_elements:
+                    # Truncate long paths for display
+                    display_path = root if len(root) <= 100 else root[:97] + "..."
+                    safe_update(lambda: ui_elements['status_label'].config(text=f"Access denied: {display_path}", fg='red'))
+                # Mark this root as skipped so we don't process its children
+                skipped_roots.append(root)
+                # Remove all subdirectories from dirs so os.walk doesn't try to enter them
+                dirs[:] = []
                 continue
             # Get the base directory name from the source path
             base_dir = os.path.basename(os.path.normpath(source_path))
@@ -302,21 +337,43 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
             destination_dir = os.path.join(destination_path, base_dir)
 
             # If the destination path doesn't exist, create it
-            if not os.path.exists(destination_dir):
-                os.makedirs(destination_dir)
+            try:
+                if not os.path.exists(destination_dir):
+                    os.makedirs(destination_dir)
+            except (PermissionError, OSError) as e:
+                error_msg = f"Access denied creating destination: {destination_dir}"
+                logging.error(f'{error_msg}: {e}')
+                if 'status_label' in ui_elements:
+                    safe_update(lambda: ui_elements['status_label'].config(text=error_msg, fg='red'))
+                continue
 
             # Create the corresponding directory structure in the destination path
-            relative_path = os.path.relpath(root, source_path)
-            destination_root = os.path.join(destination_dir, relative_path)
-            os.makedirs(destination_root, exist_ok=True)
-            # High-level FOLDER SKIP: If the entire subtree is identical, skip+log only if not already under a skipped parent
-            if folders_are_identical(root, destination_root):
-                logging.info(f"Skipping identical folder: {root}")
-                sync_folder_deletes(root, destination_root)
-                skipped_roots.append(root)
+            try:
+                relative_path = os.path.relpath(root, source_path)
+                destination_root = os.path.join(destination_dir, relative_path)
+                os.makedirs(destination_root, exist_ok=True)
+            except (PermissionError, OSError) as e:
+                error_msg = f"Access denied creating directory: {destination_root}"
+                logging.warning(f'{error_msg}: {e}')
+                if 'status_label' in ui_elements:
+                    display_path = destination_root if len(destination_root) <= 100 else destination_root[:97] + "..."
+                    safe_update(lambda: ui_elements['status_label'].config(text=f"Access denied: {display_path}", fg='red'))
                 continue
+            # High-level FOLDER SKIP: If the entire subtree is identical, skip+log only if not already under a skipped parent
+            try:
+                if folders_are_identical(root, destination_root):
+                    logging.info(f"Skipping identical folder: {root}")
+                    sync_folder_deletes(root, destination_root)
+                    skipped_roots.append(root)
+                    continue
+            except (PermissionError, OSError) as e:
+                logging.warning(f'Access denied checking folder identity for {root}: {e}')
+                # Continue processing files even if we can't check folder identity
+            except Exception as e:
+                logging.warning(f'Error checking folder identity for {root}: {e}')
+                # Continue processing files
             overall_pbar.set_description(f"Processing {root}")
-            ui_elements['description_label'].config(text=f"Processing {root}")
+            safe_update(lambda: ui_elements['description_label'].config(text=f"Processing {root}"))
 
             # Copy new or modified files to the destination directory
             for file in files:  # Skip a few if the last update has failed to complete
@@ -329,8 +386,21 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
                 destination_file = os.path.join(destination_root, file)
 
                 # Determine if this is a video file and use appropriate comparison method
-                is_video = is_video_file(source_file)
-                should_copy, copy_reason = should_copy_file(source_file, destination_file, is_video)
+                try:
+                    is_video = is_video_file(source_file)
+                    should_copy, copy_reason = should_copy_file(source_file, destination_file, is_video)
+                except (PermissionError, OSError) as e:
+                    error_msg = f"Access denied reading file info: {source_file}"
+                    logging.warning(f'{error_msg}: {e}')
+                    if 'status_label' in ui_elements:
+                        display_path = source_file if len(source_file) <= 100 else source_file[:97] + "..."
+                        safe_update(lambda: ui_elements['status_label'].config(text=f"Access denied: {display_path}", fg='red'))
+                    should_copy = False
+                    copy_reason = "skipped"
+                except Exception as e:
+                    logging.warning(f'Error checking file {source_file}: {e}')
+                    should_copy = False
+                    copy_reason = "skipped"
                 
                 if should_copy:
                     try:
@@ -349,8 +419,26 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
                         # Remove all code and calculations regarding speed_label, eta_label, speed, files_per_second, and ETA updates.
                         # Only keep progress bar and 'Processing' text updates, and final summary UI.
                         
+                    except (PermissionError, OSError) as e:
+                        error_msg = f"Access is denied: {source_file}"
+                        logging.error(f'{error_msg}: {e}')
+                        # Display error in UI
+                        if 'status_label' in ui_elements:
+                            # Truncate long paths for display
+                            display_path = source_file if len(source_file) <= 100 else source_file[:97] + "..."
+                            safe_update(lambda: ui_elements['status_label'].config(text=f"Access denied: {display_path}", fg='red'))
+                        # Decrement counter if copy failed
+                        if copy_reason == "new":
+                            new_copied_count -= 1
+                        elif copy_reason == "replaced":
+                            replaced_count -= 1
                     except Exception as e:
-                        logging.error(f'Error copying {source_file}: {e}')
+                        error_msg = f"Error copying {source_file}: {e}"
+                        logging.error(error_msg)
+                        # Display error in UI
+                        if 'status_label' in ui_elements:
+                            display_path = source_file if len(source_file) <= 100 else source_file[:97] + "..."
+                            safe_update(lambda: ui_elements['status_label'].config(text=f"Error: {display_path}", fg='red'))
                         # Decrement counter if copy failed
                         if copy_reason == "new":
                             new_copied_count -= 1
@@ -361,49 +449,62 @@ def backup(window, source_paths, destination_path, start=-1, ui_elements=None):
                     skipped_count += 1  # Increment for each file (including folders)
                 
                 overall_pbar.update(1)
-                ui_elements['progress_bar']['value'] += 1
+                # Track progress locally for thread-safe updates
+                # We'll update the actual progress bar value through the queue
+                def update_progress():
+                    ui_elements['progress_bar']['value'] += 1
+                    current_val = ui_elements['progress_bar']['value']
+                    # Update UI less frequently for better performance (every 10 files or at end)
+                    if current_val % 10 == 0 or current_val == ui_elements['progress_bar']['maximum']:
+                        try:
+                            percent = int((current_val / ui_elements['progress_bar']['maximum']) * 100) if ui_elements['progress_bar']['maximum'] else 0
+                            ui_elements['progress_label'].config(text=f"{percent}%")
+                            window.update_idletasks()  # Update the UI
+                        except Exception as e:
+                            logging.warning(f"Failed to update progress label: {e}")
                 
-                # Update UI less frequently for better performance (every 10 files or at end)
-                if ui_elements['progress_bar']['value'] % 10 == 0 or ui_elements['progress_bar']['value'] == ui_elements['progress_bar']['maximum']:
-                    try:
-                        percent = int((ui_elements['progress_bar']['value'] / ui_elements['progress_bar']['maximum']) * 100) if ui_elements['progress_bar']['maximum'] else 0
-                        ui_elements['progress_label'].config(text=f"{percent}%")
-                        window.update_idletasks()  # Update the UI
-                    except Exception as e:
-                        logging.warning(f"Failed to update progress label: {e}")
+                safe_update(update_progress)
 
         # Remove deleted files from the destination directory
-        for root, dirs, files in os.walk(destination_dir):
-            for file in files:
-                try:
-                    # Calculate relative path from destination to source
-                    relative_path = os.path.relpath(root, destination_dir)
-                    source_file = os.path.join(source_path, relative_path, file)
-                    destination_file = os.path.join(root, file)
+        try:
+            for root, dirs, files in os.walk(destination_dir):
+                for file in files:
+                    try:
+                        # Calculate relative path from destination to source
+                        relative_path = os.path.relpath(root, destination_dir)
+                        source_file = os.path.join(source_path, relative_path, file)
+                        destination_file = os.path.join(root, file)
 
-                    # Delete the file if it's not present in the source path
-                    if not os.path.exists(source_file):
-                        os.remove(destination_file)
-                        deleted_count += 1
-                except Exception as e:
-                    logging.error(f'Error processing file {file} in {root}: {e}')
+                        # Delete the file if it's not present in the source path
+                        if not os.path.exists(source_file):
+                            os.remove(destination_file)
+                            deleted_count += 1
+                    except (PermissionError, OSError) as e:
+                        logging.warning(f'Access denied processing file {file} in {root}: {e}')
+                    except Exception as e:
+                        logging.error(f'Error processing file {file} in {root}: {e}')
+        except (PermissionError, OSError) as e:
+            logging.warning(f'Access denied walking destination directory {destination_dir}: {e}')
 
     # Close the overall progress bar and finalize UI to 100%
     overall_pbar.close()
     try:
-        ui_elements['progress_bar']['value'] = ui_elements['progress_bar']['maximum']
-        ui_elements['progress_label'].config(text="100%")
-        
         # Final statistics
         total_time = (datetime.now() - start_time).total_seconds()
         avg_speed = (bytes_copied / (1024 * 1024)) / total_time if total_time > 0 else 0
         files_per_second = total_files / total_time if total_time > 0 else 0
         
-        ui_elements['current_file_label'].config(text="Backup completed!")
-        ui_elements['speed_label'].config(text=f"Final Speed: {files_per_second:.1f} files/s")
-        ui_elements['eta_label'].config(text=f"Total Time: {int(total_time//60)}m {int(total_time%60)}s")
+        # Update UI on main thread
+        def finalize_ui():
+            ui_elements['progress_bar']['value'] = ui_elements['progress_bar']['maximum']
+            ui_elements['progress_label'].config(text="100%")
+            ui_elements['current_file_label'].config(text="Backup completed!")
+            # Update status label with completion message
+            if 'status_label' in ui_elements:
+                ui_elements['status_label'].config(text=f"Backup completed! Time: {int(total_time//60)}m {int(total_time%60)}s", fg='green')
+            window.update_idletasks()
         
-        window.update_idletasks()
+        safe_update(finalize_ui)
     except Exception as e:
         logging.warning(f"Error finalizing UI: {e}")
 
@@ -455,7 +556,7 @@ def write_bookmark_item(html_file, item, indentation=2):
         html_file.write('</ul>\n')
 
 
-def handle_predefined(event, window, ui_elements):
+def handle_predefined(event, window, ui_elements, update_queue=None):
     try:
         selected_value = event
         backup_dict = {
@@ -478,7 +579,7 @@ def handle_predefined(event, window, ui_elements):
         source_paths = backup_dict[selected_value]
         destination_path = dest_dict[selected_value]
 
-        new_copied_count, replaced_count, skipped_count, deleted_count, bytes_copied, total_time = backup(window, source_paths, destination_path, -1, ui_elements)
+        new_copied_count, replaced_count, skipped_count, deleted_count, bytes_copied, total_time = backup(window, source_paths, destination_path, -1, ui_elements, update_queue)
     except Exception as e:
         error_text = f"Backup failed: {str(e)}"
         error_label = tk.Label(window, text=error_text, fg='red')
